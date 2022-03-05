@@ -1,0 +1,619 @@
+<html>
+<body>
+
+You can pause with space, "p", or the play/pause button. To get started, enter your unique ID number, and press the start button.
+<br>
+After each session, the box that appears has the results, and it's already copied to the clipboard.
+<br>
+
+<br>
+<div id="root">
+</div>
+
+<div id="startUp">
+Please enter your unique code below, then click "Start".
+<br>
+<input type="numeric" id="userNumber">
+
+<button id="StartButton" onclick="setup()">Start</button>
+</div>
+
+
+
+<script>
+paused =0;
+unfreezeTime=null;
+pauseTime=null;
+zonex=40;
+zoney=30;
+numofpieces=4;
+playerScore=0;
+//size of the play area
+absoluteX = 480;
+absoluteY = 270;
+//how long to play?
+//modeDuration=5*60*1000;
+modeDuration=20*1000;
+gameTime=null;
+gameMode=0;
+gameRate=1;
+testPattern=[['a','b','a','b'],['b','a','b','a']];
+testStep=0;
+//user is the player id number
+rawData=[];
+colorList=["blue","red", "yellow", "purple", "rgb(0,255,0)"];
+gameModeNames=["baseline","active and passive","passive only","no points"];
+relaxInterval=6*50;//is times by 20, so the leading number is seconds
+//time of nothing after scoring
+coolOffTime=1*1000;
+//how fast do the boxes move
+speedCoeff=1;
+//passive point numbers
+freePointsGiven=0;
+previousFreeTime=null;
+intervalFlag=0;
+//last three baselines
+var responseHistory=[[0],[0],[0]];
+
+
+function setup() {
+  user=document.getElementById("userNumber").value;
+  pieces = new Array(numofpieces);
+  for (i=0; i<numofpieces; ++i) pieces[i]= new component(30, 30, colorList[i], 0, 0);
+  window.addEventListener('mousedown', function (e) {
+    myGameArea.click = 1;
+  })
+  window.addEventListener('mouseup', function (e) {
+    myGameArea.click = 0;
+    myGameArea.controlling =0;
+  })
+  window.addEventListener('mousemove', function (e) {
+    myGameArea.mousex = e.pageX;
+    myGameArea.mousey = e.pageY;
+  })
+  window.addEventListener('keydown', function (e) {
+    if (e.keyCode == 32 || e.keyCode == 80) {pause()}
+  })
+//remove the startup stuff
+  document.getElementById("startUp").parentNode.removeChild(document.getElementById("startUp"));
+  chooseMode();
+}
+
+function chooseMode(){
+//remove everything else
+  theRoot=document.getElementById("root")
+  while (theRoot.firstChild){
+    theRoot.removeChild(theRoot.lastChild);
+  }
+//put in buttons to choose the game modes
+  buttonBox = document.createElement('div');
+  buttonBox.id="buttons";
+  buttonTable= document.createElement('table');
+  openRow= buttonTable.insertRow();
+  cell=openRow.insertCell();
+  colorblind = document.createElement("button");
+  colorblind.innerHTML = "Color Test";
+  colorblind.onclick= function(){colorTest()};
+  cell.appendChild(colorblind);
+  cell=openRow.insertCell();
+  baseline = document.createElement("button");
+  baseline.innerHTML = "Style 1";
+  baseline.onclick= function(){runMode(0,1.0)};
+  cell.appendChild(baseline);
+  cell=openRow.insertCell();
+  ncrWith = document.createElement("button");
+  ncrWith.innerHTML = "Style 2Y";
+  ncrWith.onclick= function(){runMode("2Y",1.0)};
+  cell.appendChild(ncrWith);
+  cell=openRow.insertCell();
+  ncrWithout = document.createElement("button");
+  ncrWithout.innerHTML = "Style 3Y";
+  ncrWithout.onclick= function(){runMode("3Y",1.0)};
+  cell.appendChild(ncrWithout);
+  cell=openRow.insertCell();
+  extinction = document.createElement("button");
+  extinction.innerHTML = "Style 4";
+  extinction.onclick= function(){runMode(3,1.0)};
+  cell.appendChild(extinction);
+  for (i=0; i<10; ++i){
+    const coeff=(9.0-i)/10.0
+    openRow= buttonTable.insertRow();
+    openRow.insertCell();
+    openRow.insertCell();
+    cell=openRow.insertCell();
+    thisbutton = document.createElement("button");
+    thisbutton.innerHTML = "Style 2-"+(9-i);
+    thisbutton.onclick= function(){runMode(1,coeff)};
+    cell.appendChild(thisbutton);
+    cell=openRow.insertCell();
+    thisbutton = document.createElement("button");
+    thisbutton.innerHTML = "Style 3-"+(9-i);
+    thisbutton.onclick= function(){runMode(2,coeff)};
+    cell.appendChild(thisbutton);
+  }
+  buttonBox.append(buttonTable);
+  document.getElementById("root").appendChild(buttonBox);
+}
+
+function runMode(mode,rate){
+//remove everything else
+  theRoot=document.getElementById("root")
+  while (theRoot.firstChild){
+    theRoot.removeChild(theRoot.lastChild);
+  }
+//add the game canvas
+  activeElements=document.createElement('div');
+  pauseButton=document.createElement("button");
+  pauseButton.id="playPause";
+  pauseButton.onclick= function(){pause()};
+  pauseButton.innerHTML= "Play/Pause";
+  gameCanvas=document.createElement("canvas");
+  gameCanvas.id="zone";
+  linebreak = document.createElement("br");
+  activeElements.append(pauseButton,linebreak,gameCanvas);
+  document.getElementById("root").appendChild(activeElements);
+//start the game
+  intervalFlag=0;
+  gameMode=mode;
+  if (mode=="2Y"){
+    gameMode=1;
+    intervalFlag=1;
+  }
+  if (mode=="3Y"){
+    gameMode=2;
+    intervalFlag=1;
+  }
+  gameRate=rate;
+  myGameArea.canvas=document.getElementById("zone");
+  myGameArea.start(mode);
+  offsetx=myGameArea.canvas.getBoundingClientRect().left;
+  offsety=myGameArea.canvas.getBoundingClientRect().top;
+//reset the data
+  myGameArea.relax =0;
+  playerScore=0;
+  freePointsGiven=0;
+  rawData=[];
+//move the data in responseHistory forward, so there is room for responseHistory[0] to be written
+  if (gameMode==0){
+    for (i=2; i>0; --i){
+      responseHistory[i]=[...responseHistory[i-1]]
+    }
+    responseHistory[0]=[0]
+  }
+  if (gameMode==1 || gameMode==2){
+    previousFreeTime= Date.now();
+  }
+//set the starting time
+  gameTime=Date.now();
+  currentTime =Date.now();
+  printTime = new Date(currentTime);
+  rawData.push(", userID, "+user+", , "+printTime.toLocaleTimeString('en-US'));
+  rawData.push(", start mode, "+gameMode+", "+rate+", "+printTime.toLocaleTimeString('en-US'));
+}
+
+colorInterval=null;
+
+function colorTest(){
+//remove everything else
+  theRoot=document.getElementById("root")
+  while (theRoot.firstChild){
+    theRoot.removeChild(theRoot.lastChild);
+  }
+  //draw the screen
+  activeElements=document.createElement('div');
+  gameCanvas=document.createElement("canvas");
+  gameCanvas.id="zone";
+  myGameArea.canvas=gameCanvas;
+  myGameArea.context = myGameArea.canvas.getContext("2d");
+  activeElements.append(gameCanvas);
+  document.getElementById("root").appendChild(activeElements);
+  gameCanvas.width = absoluteX;
+  gameCanvas.height = absoluteY;
+  offsetx=myGameArea.canvas.getBoundingClientRect().left;
+  offsety=myGameArea.canvas.getBoundingClientRect().top;
+  for (i=0; i<numofpieces; ++i) pieces[i].x=(i+0.5)/numofpieces*absoluteX-pieces[i].width/2;
+  for (i=0; i<numofpieces; ++i) pieces[i].y=absoluteY/2-pieces[i].height/2;
+  colorInterval = setInterval(checkColors, 20);
+}
+
+currentColor=0
+isClicked=0;
+function checkColors(){
+  currentTime = Date.now();
+  printTime = new Date(currentTime);
+  if (currentColor==numofpieces){
+    currentColor=0
+    clearInterval(colorInterval);
+    chooseMode();
+    return;
+  }
+  myGameArea.context.fillStyle = "rgb(240,240,240)";
+  myGameArea.context.fillRect(0, 0, myGameArea.canvas.width, myGameArea.canvas.height);
+  myGameArea.context.fillStyle = "rgb(160,240,160)";
+  myGameArea.context.fillRect(0, 0, zonex, zoney);
+  myGameArea.context.fillRect(0, myGameArea.canvas.height-zoney, zonex, myGameArea.canvas.height);
+  myGameArea.context.fillRect(myGameArea.canvas.width-zonex, 0, myGameArea.canvas.width, zoney);
+  myGameArea.context.fillRect(myGameArea.canvas.width-zonex, myGameArea.canvas.height-zoney, myGameArea.canvas.width, myGameArea.canvas.height);
+  for (let i=0; i<numofpieces; i++){
+    pieces[i].draw();
+  }
+  myGameArea.context.font = "30px Arial";
+  myGameArea.context.fillStyle = "rgb(0,0,0)";
+  myGameArea.context.fillText("Please drag the " + pieces[currentColor].color + " box", 0, 30);
+  myGameArea.context.fillText("to a green corner.", 0, 60);
+//see if something new is controlled
+    if (myGameArea.click ==1 && myGameArea.wasClicked == 0){
+      //if the mouse is clicked, check if you clicked on a piece
+      for (let i=0; i<numofpieces; i++){
+        if (pieces[i].x+offsetx<=myGameArea.mousex && pieces[i].x+pieces[i].width+offsetx>=myGameArea.mousex && pieces[i].y+offsety<myGameArea.mousey && pieces[i].y+pieces[i].height+offsety>myGameArea.mousey){
+          myGameArea.controlling = 1;
+          myGameArea.controlledIndex = i;
+        }
+      }
+    }
+//release the piece if the mouse is out of bounds
+    if (myGameArea.mousex<offsetx || myGameArea.mousey<offsety || myGameArea.mousex > myGameArea.canvas.width+offsetx || myGameArea.mousey > myGameArea.canvas.height+offsety){
+      myGameArea.controlling = 0;
+      myGameArea.click = 0;
+    }
+//move the controlled thing
+    if (myGameArea.controlling == 1){
+      pieces[myGameArea.controlledIndex].x += myGameArea.mousex - myGameArea.previousMousex;
+      pieces[myGameArea.controlledIndex].y += myGameArea.mousey - myGameArea.previousMousey;
+    }
+//check for scoring
+    for (let i=0; i<numofpieces; i++){
+      if (myGameArea.controlledIndex!=i) continue;
+      if (myGameArea.click ==0 && myGameArea.wasClicked==1 && myGameArea.wasControlled ==1 && pieces[i].x+pieces[i].width>myGameArea.canvas.width-zonex && pieces[i].y<zoney){//encoding top right corner
+        rawData.push("1, Top Right, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        if (myGameArea.controlledIndex==currentColor){
+          currentColor+=1
+        }
+        for (i=0; i<numofpieces; ++i) pieces[i].x=(i+0.5)/numofpieces*absoluteX-pieces[i].width/2;
+        for (i=0; i<numofpieces; ++i) pieces[i].y=absoluteY/2-pieces[i].height/2;
+      }
+      else if (myGameArea.click ==0 && myGameArea.wasClicked==1 && myGameArea.wasControlled ==1 && pieces[i].x+pieces[i].width>myGameArea.canvas.width-zonex && pieces[i].y+pieces[i].height>myGameArea.canvas.height-zoney){//encoding bottom right corner
+//        playerScore -=1;
+        rawData.push("3, Bottom Right, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        if (myGameArea.controlledIndex==currentColor){
+          currentColor+=1
+        }
+        for (i=0; i<numofpieces; ++i) pieces[i].x=(i+0.5)/numofpieces*absoluteX-pieces[i].width/2;
+        for (i=0; i<numofpieces; ++i) pieces[i].y=absoluteY/2-pieces[i].height/2;
+      }
+      else if (myGameArea.click ==0 && myGameArea.wasClicked==1 && myGameArea.wasControlled ==1 && pieces[i].x<zonex && pieces[i].y<zoney){//encoding top left corner
+//        playerScore -=1;
+        rawData.push("0, Top Left, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        if (myGameArea.controlledIndex==currentColor){
+          currentColor+=1
+        }
+        for (i=0; i<numofpieces; ++i) pieces[i].x=(i+0.5)/numofpieces*absoluteX-pieces[i].width/2;
+        for (i=0; i<numofpieces; ++i) pieces[i].y=absoluteY/2-pieces[i].height/2;
+      }
+      else if (myGameArea.click ==0 && myGameArea.wasClicked==1 && myGameArea.wasControlled ==1 && pieces[i].x<zonex && pieces[i].y+pieces[i].height>myGameArea.canvas.height-zoney){//encoding bottom left corner
+//        playerScore -=1;
+        rawData.push("2, Bottom Left, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        if (myGameArea.controlledIndex==currentColor){
+          currentColor+=1
+        }
+        for (i=0; i<numofpieces; ++i) pieces[i].x=(i+0.5)/numofpieces*absoluteX-pieces[i].width/2;
+        for (i=0; i<numofpieces; ++i) pieces[i].y=absoluteY/2-pieces[i].height/2;
+      }
+    }
+//push variables
+    myGameArea.previousMousex=myGameArea.mousex;
+    myGameArea.previousMousey=myGameArea.mousey;
+    if (myGameArea.click ==1) { myGameArea.wasClicked =1 }
+    if (myGameArea.click ==0) { myGameArea.wasClicked =0 }
+    if (myGameArea.controlling ==1) { myGameArea.wasControlled =1 }
+    if (myGameArea.controlling ==0) { myGameArea.wasControlled =0 }
+}
+
+
+function pause(){
+  currentTime = Date.now();
+  if (paused == 0){
+    myGameArea.pause();
+    pauseTime=Date.now();
+    printTime = new Date(currentTime);
+    l=rawData.push(" ,end, , , "+printTime.toLocaleTimeString('en-US'));
+    return;
+  }
+  if (paused == 1){
+//increase the start time by the amount of paused time.
+    gameTime=gameTime+currentTime-pauseTime;
+    previousFreeTime=previousFreeTime+currentTime-pauseTime;
+    myGameArea.resume();
+    printTime = new Date(currentTime);
+    l=rawData.push(" ,end, , , "+printTime.toLocaleTimeString('en-US'));
+  }
+}
+
+function component(width, height, color, x, y) { 
+  this.width = width;
+  this.height = height;
+  this.x = x;
+  this.y = y;
+  this.color = color;
+  rv1=Math.random();
+  rv2=Math.random();
+  //set the motion to be normally distribted in 2 dimensions by using a few transformations
+  tempx=Math.sqrt(-2*Math.log(rv1))*Math.cos(2*Math.PI*rv2);
+  tempy=Math.sqrt(-2*Math.log(rv1))*Math.sin(2*Math.PI*rv2);
+  //normalize the speed.
+  this.vector = [speedCoeff*tempx/Math.sqrt(tempx*tempx+tempy*tempy),speedCoeff*tempy/Math.sqrt(tempx*tempx+tempy*tempy)];
+  this.direction = [0,0];
+  this.direction[0]=this.vector[0];
+  this.direction[1]=this.vector[1];
+
+  this.move = function(){
+    this.x = this.x +this.direction[0];
+    this.y = this.y +this.direction[1];
+  }
+  this.draw = function(){
+    ctx = myGameArea.context;
+    ctx.fillStyle = color;
+    ctx.fillRect(this.x, this.y, this.width, this.height);
+  }
+}
+
+var myGameArea = {
+  click : 0, //tells you if the mouse is down
+  wasClicked : 0, //tells you if the mouse was down before
+  controlledIndex : 0, //tells you which piece you are controlling
+  controlling : 0, //tells you if you are currently controlling a piece
+  wasControlling : 0, //tells you if you are currently controlling a piece
+  mousex : 0, //tells you where the mouse is
+  mousey : 0, //tells you where the mouse is
+  previousMousex : 0, //tells you where the mouse was
+  previousMousey : 0, //tells you where the mouse was
+  canvas : document.getElementById("zone"),
+  relax : 0, //tells you how many cycles since the last free score.
+
+
+  endMode : function(){
+    if (paused == 0){
+      this.pause();
+    }
+//make the save into text
+    outbox=document.createElement('textarea');
+    outbox.rows=rawData.length+2;
+    outbox.cols="40";
+    rawrawData="";
+    currentTime = Date.now();
+    printTime = new Date(currentTime);
+    l=rawData.push(" ,end, , , "+printTime.toLocaleTimeString('en-US'));
+    for (i=0; i<l; ++i){
+      rawrawData=rawrawData+rawData[i]+'\n';
+    }
+    outbox.value=rawrawData;
+    outbox.setAttribute('readonly','');
+
+    chooseMode();
+    theRoot.appendChild(outbox);
+    outbox.select();
+    document.execCommand('copy');
+  },
+
+
+  draw : function() {
+    this.context.fillStyle = "rgb(240,240,240)";
+    this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.context.fillStyle = "rgb(160,240,160)";
+    this.context.fillRect(0, 0, zonex, zoney);
+    this.context.fillRect(0, this.canvas.height-zoney, zonex, this.canvas.height);
+    this.context.fillRect(this.canvas.width-zonex, 0, this.canvas.width, zoney);
+    this.context.fillRect(this.canvas.width-zonex, this.canvas.height-zoney, this.canvas.width, this.canvas.height);
+    for (let i=0; i<numofpieces; i++){
+      pieces[i].draw();
+    }
+    this.context.font = "30px Arial";
+    this.context.fillStyle = "rgb(0,0,0)";
+    this.context.fillText("Your Score:" + playerScore, this.canvas.width/3, 30);
+    //this.context.fillText("Gamemode:" + gameModeNames[gameMode], 30, 90);
+  },
+
+
+  start : function() {
+    this.canvas.width = absoluteX;
+    this.canvas.height = absoluteY;
+    this.context = this.canvas.getContext("2d");
+    this.draw();
+    this.reset();
+    for (let i=0; i<numofpieces; i++){
+      pieces[i].draw();
+    }
+    this.resume();
+  },
+
+
+  update : function() {
+    currentTime = Date.now();
+//if we're out of time, end the mode.
+    if (currentTime-gameTime>modeDuration){
+      this.endMode();
+      return(0);
+    }
+//if we've recently scored, do nothing
+    if (unfreezeTime-currentTime>0){
+      return(0);
+    }
+//passive point generation
+    if (intervalFlag==1 && (gameMode==1 || gameMode==2)){
+      totalWait=0;
+      contributing=0;
+      for (i=0; i<=2; ++i){
+        if (responseHistory[i].length >freePointsGiven+1){
+          totalWait=totalWait+responseHistory[i][freePointsGiven+1]-responseHistory[i][freePointsGiven];
+          contributing++;
+        }
+      }
+      if (currentTime-previousFreeTime>totalWait/contributing/gameRate){
+        freePointsGiven++;
+        previousFreeTime=currentTime;
+        this.score(5);
+        return(0);
+      }
+    }
+    if (intervalFlag==0 && (gameMode==1 || gameMode==2)){
+      totalResponses=0;
+      contributing=0;
+      for (i=0; i<2; ++i){
+        if (responseHistory[i].length > 1){
+          totalResponses=totalResponses+responseHistory[i].length-1;
+          contributing++;
+        }
+      }
+      if (totalResponses!=0 && currentTime-previousFreeTime>Math.round(modeDuration/totalResponses*contributing/gameRate/1000)*1000){
+        freePointsGiven++;
+        previousFreeTime=currentTime;
+        this.score(5);
+        return(0);
+      }
+    }
+//see if something new is controlled
+    if (this.click ==1 && this.wasClicked == 0){
+      //if the mouse is clicked, check if you clicked on a piece
+      for (let i=0; i<numofpieces; i++){
+        if (pieces[i].x+offsetx<=this.mousex && pieces[i].x+pieces[i].width+offsetx>=this.mousex && pieces[i].y+offsety<this.mousey && pieces[i].y+pieces[i].height+offsety>this.mousey){
+          this.controlling = 1;
+          this.controlledIndex = i;
+        }
+      }
+    }
+//release the piece if the mouse is out of bounds
+    if (this.mousex<offsetx || this.mousey<offsety || this.mousex > this.canvas.width+offsetx || this.mousey > this.canvas.height+offsety){
+      this.controlling = 0;
+      myGameArea.click = 0;
+    }
+//move the controlled thing
+    if (this.controlling == 1){
+      pieces[this.controlledIndex].x += this.mousex - this.previousMousex;
+      pieces[this.controlledIndex].y += this.mousey - this.previousMousey;
+    }
+//check for scoring
+    for (let i=0; i<numofpieces; i++){
+      if (this.controlledIndex!=i) continue;
+      if (this.click ==0 && this.wasClicked==1 && this.wasControlled ==1 && pieces[i].x+pieces[i].width>this.canvas.width-zonex && pieces[i].y<zoney){//encoding top right corner
+        rawData.push("1, Top Right, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+//if the target action
+        if (this.controlledIndex==0){
+//if the gameMode is in an active version, give a point too.
+          if (gameMode==0 || gameMode==1){
+            this.score(1);
+//            currentTime = Date.now();
+            if (gameMode==0){
+              (responseHistory[0]).push(currentTime-gameTime);
+            }
+            return(0);
+          }
+        }
+        this.reset();
+      }
+      if (this.click ==0 && this.wasClicked==1 && this.wasControlled ==1 && pieces[i].x+pieces[i].width>this.canvas.width-zonex && pieces[i].y+pieces[i].height>this.canvas.height-zoney){//encoding bottom right corner
+//        playerScore -=1;
+        rawData.push("3, Bottom Right, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        this.reset();
+      }
+      if (this.click ==0 && this.wasClicked==1 && this.wasControlled ==1 && pieces[i].x<zonex && pieces[i].y<zoney){//encoding top left corner
+//        playerScore -=1;
+        rawData.push("0, Top Left, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        this.reset();
+      }
+      if (this.click ==0 && this.wasClicked==1 && this.wasControlled ==1 && pieces[i].x<zonex && pieces[i].y+pieces[i].height>this.canvas.height-zoney){//encoding bottom left corner
+//        playerScore -=1;
+        rawData.push("2, Bottom Left, "+i+", "+colorList[i]+", "+printTime.toLocaleTimeString('en-US'));
+        this.reset();
+      }
+    }
+//push variables
+    this.previousMousex=this.mousex;
+    this.previousMousey=this.mousey;
+    if (this.click ==1) { this.wasClicked =1 }
+    if (this.click ==0) { this.wasClicked =0 }
+    if (this.controlling ==1) { this.wasControlled =1 }
+    if (this.controlling ==0) { this.wasControlled =0 }
+//handle bounces
+    for (let i=0; i<numofpieces; i++){
+      if (pieces[i].x<0){
+        pieces[i].direction[0]=Math.abs(pieces[i].vector[0])
+      }
+      if (pieces[i].x+pieces[i].width>this.canvas.width){
+        pieces[i].direction[0]=-Math.abs(pieces[i].vector[0])
+      }
+      if (pieces[i].y<0){
+        pieces[i].direction[1]=Math.abs(pieces[i].vector[1])
+      }
+      if (pieces[i].y+pieces[i].height>this.canvas.height){
+        pieces[i].direction[1]=-Math.abs(pieces[i].vector[1])
+      }
+//still need something to handle the pieces going into the zones on their own.
+//move only if this piece isn't being controlled.
+      if (this.controlling!=1 || this.controlledIndex != i){
+        pieces[i].move();
+      }
+    }
+    this.draw();
+  },
+
+
+  pause : function() {
+    clearInterval(this.interval);
+    paused=1;
+  },
+
+
+  resume : function() {
+    this.interval = setInterval(updateGameArea, 20);
+    paused=0;
+  },
+
+
+  score : function(amount) {
+    currentTime = Date.now();
+    printTime = new Date(currentTime);
+//Score change???
+    playerScore += amount;
+    unfreezeTime = Date.now()+coolOffTime;
+    this.blank();
+    this.context.fillText("Congratulations!", this.canvas.width/3, 60);
+    if (amount==1) this.context.fillText("You got a point!", this.canvas.width/3, 120);
+    else this.context.fillText("You got "+amount+" points!", this.canvas.width/3, 120);
+    rawData.push(", Scored, "+amount+", , "+printTime.toLocaleTimeString('en-US'));
+    this.reset();
+  },
+
+
+  blank : function() {
+    this.context.fillStyle = "rgb(240,240,240)";
+    this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.context.fillStyle = "rgb(0,0,0)";
+  },
+
+
+  reset : function() {
+    for (let i=0; i<numofpieces; i++){
+      pieces[i].x=(this.canvas.width-2*zonex-pieces[i].width)*Math.random()+zonex;
+      pieces[i].y=(this.canvas.height-2*zoney-pieces[i].height)*Math.random()+zoney;
+      rv1=Math.random();
+      rv2=Math.random();
+      //set the motion to be normally distribted in 2 dimensions by using a few transformations
+      tempx=Math.sqrt(-2*Math.log(rv1))*Math.cos(2*Math.PI*rv2);
+      tempy=Math.sqrt(-2*Math.log(rv1))*Math.sin(2*Math.PI*rv2);
+      //normalize the speed.
+      pieces[i].vector = [speedCoeff*tempx/Math.sqrt(tempx*tempx+tempy*tempy),speedCoeff*tempy/Math.sqrt(tempx*tempx+tempy*tempy)];
+      pieces[i].direction[0]=pieces[i].vector[0];
+      pieces[i].direction[1]=pieces[i].vector[1];
+    }
+    this.controlling=0;
+  }
+}
+
+function updateGameArea() {
+  myGameArea.update();
+}
+</script>
+
+
+</body>
+</html>
